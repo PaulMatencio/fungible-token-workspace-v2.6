@@ -5,6 +5,7 @@ export type AppErrorCode =
   | 'NETWORK_MISMATCH'
   | 'VALIDATION'
   | 'CONTRACT_REJECTED'
+  | 'CONTRACT_VERSION'
   | 'NOT_CONNECTED'
   | 'TOOLING'
   | 'UNKNOWN';

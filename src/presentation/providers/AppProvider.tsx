@@ -5,7 +5,7 @@ import { MultisigService } from '@/application/multisigService';
 import type { DeployParams, TokenGateway, TxLogEntry } from '@/application/ports';
 import { TokenService } from '@/application/tokenService';
 import { buildDeployParams, type DeployForm } from '@/application/validation';
-import { friendlyMessage } from '@/domain/errors';
+import { AppError, friendlyMessage } from '@/domain/errors';
 import { bytesToHex } from '@/domain/hex';
 import { resolveRole, type RoleContext } from '@/domain/roles';
 import type { JubjubPointJson, TokenState } from '@/domain/token';
@@ -356,6 +356,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
         }
       } catch (e) {
+        // A saved address that belongs to the other contract version would fail on every connect: forget the pointer
+        // (the contract itself is untouched) and say why.
+        if (e instanceof AppError && e.code === 'CONTRACT_VERSION') await identityStore.setDeployment(null);
         if (!cancelled) setError(friendlyMessage(e));
       }
     })();

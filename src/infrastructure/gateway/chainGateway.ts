@@ -39,6 +39,15 @@ const toReceipt = (r: { public: { txId: string; txHash: string; blockHeight: num
   blockHeight: r.public.blockHeight
 });
 
+/**
+ * Circuits registered on a contract that this app's compiled contract doesn't have. Same-named circuits of another
+ * contract version have different verifier keys, so midnight-js would fail with a confusing "mismatched verifier keys";
+ * detecting foreign circuits first gives a clear answer.
+ */
+export function foreignCircuits(registered: Iterable<string>, known: readonly string[]): string[] {
+  return [...registered].filter((c) => !known.includes(c));
+}
+
 export class ChainGateway implements TokenGateway {
   readonly mode = 'wallet' as const;
 
@@ -65,6 +74,13 @@ export class ChainGateway implements TokenGateway {
   private static async open(providers: AppProviders, address: string, getSecretKey: () => Uint8Array): Promise<Found> {
     const have = await ChainGateway.registered(providers, address);
     const all = allCircuitIds();
+    const foreign = foreignCircuits(have, all);
+    if (foreign.length > 0) {
+      throw new AppError(
+        'CONTRACT_VERSION',
+        `Contract ${address.slice(0, 10)}… is a different version of this token (it has circuits this app does not know: ${foreign.join(', ')}). It is a v3 contract — open it in the v3 app at http://localhost:3000 (the v3 project, fungible-token-workspace). Nothing was changed.`
+      );
+    }
     const subset = all.every((c) => have.has(c)) ? undefined : all.filter((c) => have.has(c));
     return (await (findDeployedContract as unknown as (p: unknown, o: unknown) => Promise<Found>)(providers, {
       contractAddress: address,
