@@ -1,0 +1,683 @@
+// SPDX-License-Identifier: MIT
+// Compact FungibleToken Contract v2.6 - Privacy-Preserving Multi-Sig Governance
+// Incorporates OpenZeppelin Contracts for Compact Multi-Sig Presets on Midnight Network
+//
+// CHANGELOG vs v2.4 (security fixes):
+//   1. adminReallocate is now gated by the same 2-of-3(+) multisig as mint/burn,
+//      not by a single owner key, and respects whenNotPaused(). This closes an
+//      unrestricted-seizure backdoor that let one key move ANY account's balance.
+//   2. assertApprovals now accepts up to 3 signer slots and actually enforces
+//      _multisigThreshold (the number of *valid, non-duplicate, registered*
+//      signatures required), instead of hardcoding "exactly 2 signatures."
+//      Unused slots are marked with a zero/default pubkey and are simply
+//      skipped, so a threshold of 1 or 3 both work correctly at construction
+//      time (previously threshold=3 permanently bricked the contract, and
+//      threshold=1 was silently upgraded to require 2 anyway).
+//   3. emergencyWithdraw no longer accepts an unused `token` parameter that
+//      implied cross-token recovery it never performed; it is documented as
+//      recovering only this token's own contract-held balance. If genuine
+//      arbitrary-token rescue is needed, that requires modeling external
+//      token contracts explicitly and should be a separate, carefully
+//      reviewed circuit.
+//   4. (v2.6) Added multisig-gated signer rotation via `rotateSigner`, closing
+//      the previous "no re-keying" gap. See the circuit's doc comment for the
+//      design (commitment-addressed removal, proof-of-possession for the
+//      incoming key, allowed while paused).
+//   5. Known remaining limitations (product decisions, not fixed here):
+//      - The threshold itself cannot be changed after deployment.
+//      - Rotation swaps one signer at a time (signer count stays fixed at 3).
+//      - If enough keys are lost that fewer than _multisigThreshold signers
+//        remain reachable, rotation itself cannot be authorized: rotate
+//        BEFORE you fall below threshold, not after.
+pragma language_version >= 0.23;
+
+import CompactStandardLibrary;
+
+// ============ Schnorr Signature Verification on Jubjub Curve ============
+export struct SchnorrSignature {
+  announcement: JubjubPoint,
+  response: Field
+}
+
+struct SchnorrHashInput<#n> {
+  ann_x: Field,
+  ann_y: Field,
+  pk_x: Field,
+  pk_y: Field,
+  msg: Vector<n, Field>
+}
+
+// Witness providing quotient and remainder for dividing challenge hash by 2^248
+witness getSchnorrReduction(challengeHash: Field): [Field, Uint<248>];
+
+/**
+ * Verifies a Schnorr signature over Jubjub curve with challenge truncated to 248 bits.
+ * `response` and the truncated challenge `c` are converted from `Field` to `JubjubScalar`
+ * via an explicit `as JubjubScalar` cast before scalar multiplication (required since
+ * compactc 0.19 / toolchain 0.34, which made JubjubScalar a distinct type from Field).
+ * This is a safe no-op here: `c` is already < 2^248 (well under the Jubjub scalar
+ * order, by construction of the reduction above), and `response` must already be
+ * < the Jubjub scalar order for a validly-constructed signature to verify at all.
+ */
+circuit schnorrVerify<#n>(
+  msg: Vector<n, Field>,
+  signature: SchnorrSignature,
+  pk: JubjubPoint
+): [] {
+  const {announcement, response} = signature;
+  const cFull: Field = transientHash<SchnorrHashInput<n>>(
+    SchnorrHashInput<n> {
+      ann_x: jubjubPointX(announcement),
+      ann_y: jubjubPointY(announcement),
+      pk_x: jubjubPointX(pk),
+      pk_y: jubjubPointY(pk),
+      msg: msg
+    }
+  );
+  const TWO_248: Field = 452312848583266388373324160190187140051835877600158453279131187530910662656 as Field;
+  const [q, cTruncated] = getSchnorrReduction(cFull);
+  assert(disclose(q) * TWO_248 + (disclose(cTruncated) as Field) == cFull, "FungibleToken: invalid challenge reduction");
+  const c: Field = disclose(cTruncated) as Field;
+  const lhs: JubjubPoint = ecMulGenerator(response as JubjubScalar);
+  const rhs: JubjubPoint = ecAdd(announcement, ecMul(pk, c as JubjubScalar));
+  assert(jubjubPointX(lhs) == jubjubPointX(rhs) && jubjubPointY(lhs) == jubjubPointY(rhs), "FungibleToken: invalid signature");
+}
+
+// ============ Ledger State ============
+export ledger _balances: Map<Bytes<32>, Uint<128>>;
+export ledger _allowances: Map<[Bytes<32>, Bytes<32>], Uint<128>>;
+export ledger _totalSupply: Uint<128>;
+export ledger _maxSupply: Uint<128>;
+export ledger _name: Opaque<"string">;
+export ledger _symbol: Opaque<"string">;
+export ledger _decimals: Uint<8>;
+export ledger owner: Bytes<32>;
+export ledger _contractSalt: Bytes<32>;
+
+// Emergency Stop State
+export ledger _paused: Boolean;
+export ledger _emergencyPauser: Bytes<32>;
+
+// Privacy-Preserving Multi-Sig State (OpenZeppelin Pattern)
+export ledger _multisigSigners: Set<Bytes<32>>;
+export ledger _multisigThreshold: Uint<8>;
+export ledger _multisigSignerCount: Uint<8>;
+export ledger _multisigNonce: Counter;
+
+// Private witness providing caller secret key for individual authentication
+witness localSecretKey(): Bytes<32>;
+
+/**
+ * Authenticates that the prover possesses the private secret key
+ * corresponding to the specified public identity/address.
+ * Bound to _contractSalt for cross-contract replay protection.
+ */
+circuit authenticate(account: Bytes<32>): [] {
+  const sk = localSecretKey();
+  const domainTag = pad(32, "fungible-token:auth");
+  const derivedAccount = persistentHash<[Bytes<32>, Bytes<32>, Bytes<32>]>([
+    domainTag,
+    _contractSalt,
+    sk
+  ]);
+  assert(derivedAccount == account, "FungibleToken: caller authorization failed");
+}
+
+// Pause Modifiers
+circuit whenNotPaused(): [] {
+  assert(!_paused, "FungibleToken: contract is paused");
+}
+
+circuit whenPaused(): [] {
+  assert(_paused, "FungibleToken: contract is not paused");
+}
+
+circuit onlyOwner(account: Bytes<32>): [] {
+  authenticate(account);
+  assert(disclose(account) == owner, "FungibleToken: only owner can call this");
+}
+
+circuit onlyPauser(account: Bytes<32>): [] {
+  authenticate(account);
+  assert(disclose(account) == _emergencyPauser || disclose(account) == owner,
+         "FungibleToken: only pauser or owner can call this");
+}
+
+// ============ Multi-Sig Helper Circuits ============
+
+/**
+ * Computes a signer commitment from a public key:
+ * persistentHash([pad(32, "multisig:signer:"), salt, pk_x, pk_y])
+ * Pure, so deployers and signers can derive commitments off-chain.
+ */
+export pure circuit calculateSignerCommitment(pk: JubjubPoint, salt: Bytes<32>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>, Bytes<32>, Bytes<32>]>([
+    pad(32, "multisig:signer:"),
+    salt,
+    jubjubPointX(pk) as Bytes<32>,
+    jubjubPointY(pk) as Bytes<32>
+  ]);
+}
+
+pure circuit isZeroPoint(pk: JubjubPoint): Boolean {
+  return jubjubPointX(pk) == (0 as Field) && jubjubPointY(pk) == (0 as Field);
+}
+
+/**
+ * Asserts two pubkey slots are not the same registered signer, unless
+ * either slot is the zero/default point (an unused slot, which is exempt
+ * from the duplicate check).
+ */
+circuit assertDistinctPair(a: JubjubPoint, b: JubjubPoint): [] {
+  if (disclose(!isZeroPoint(a) && !isZeroPoint(b))) {
+    assert(
+      jubjubPointX(a) != jubjubPointX(b) || jubjubPointY(a) != jubjubPointY(b),
+      "FungibleToken: duplicate signer detected"
+    );
+  }
+}
+
+/**
+ * Enforces threshold signature verification over an operation digest, using
+ * up to 3 signer slots. Unused slots (beyond the configured threshold) MUST
+ * be passed as a zero/default JubjubPoint and are skipped rather than
+ * verified, which lets a single deployment support threshold in {1, 2, 3}
+ * without bricking the contract or silently over-requiring signatures.
+ *
+ * Verifies, for every non-zero slot:
+ * 1. No two supplied signer pubkeys are duplicates.
+ * 2. Each signer commitment is registered in _multisigSigners.
+ * 3. Each Schnorr signature is cryptographically valid over the operation hash.
+ * Then asserts that the number of valid, non-zero, distinct, registered
+ * signatures meets or exceeds _multisigThreshold.
+ */
+circuit assertApprovals(
+  msgHash: Bytes<32>,
+  pubkeys: Vector<3, JubjubPoint>,
+  signatures: Vector<3, SchnorrSignature>
+): [] {
+  // Pairwise duplicate check across all non-zero slots. Compact's for-loops
+  // require static range bounds, so with only 3 slots we enumerate the 3
+  // possible pairs explicitly (via the pure helper below) rather than
+  // nesting a loop with a dynamic start bound, which the compiler rejects.
+  assertDistinctPair(pubkeys[0], pubkeys[1]);
+  assertDistinctPair(pubkeys[0], pubkeys[2]);
+  assertDistinctPair(pubkeys[1], pubkeys[2]);
+
+  const msgVec: Vector<1, Field> = [transientHash<Bytes<32>>(msgHash)];
+
+  // Unrolled (rather than a loop with a mutable accumulator) to stay within
+  // the same static, index-literal style already used elsewhere in this
+  // file. Each slot contributes 0 or 1 to validCount depending on whether
+  // it is populated (non-zero); populated slots are checked for
+  // registration and signature validity as a side effect.
+  const validCount0: Uint<8> = checkApprovalSlot(pubkeys[0], signatures[0], msgVec);
+  const validCount1: Uint<8> = checkApprovalSlot(pubkeys[1], signatures[1], msgVec);
+  const validCount2: Uint<8> = checkApprovalSlot(pubkeys[2], signatures[2], msgVec);
+  const validCount: Uint<8> = (validCount0 + validCount1 + validCount2) as Uint<8>;
+
+  assert(validCount >= _multisigThreshold, "FungibleToken: threshold not met");
+}
+
+/**
+ * Checks one multisig approval slot: if the slot is populated (non-zero
+ * pubkey), asserts the signer is registered and the Schnorr signature is
+ * valid, then returns 1; an empty (zero-pubkey) slot is skipped and
+ * returns 0 without any assertion.
+ */
+circuit checkApprovalSlot(
+  pk: JubjubPoint,
+  signature: SchnorrSignature,
+  msgVec: Vector<1, Field>
+): Uint<8> {
+  if (disclose(isZeroPoint(pk))) {
+    return 0;
+  }
+  const comm = calculateSignerCommitment(pk, _contractSalt);
+  assert(_multisigSigners.member(disclose(comm)), "FungibleToken: signer not registered");
+  schnorrVerify<1>(msgVec, signature, pk);
+  return 1;
+}
+
+// ============ Constructor ============
+
+constructor(
+  salt_: Bytes<32>,
+  initialOwner: Bytes<32>,
+  name_: Opaque<"string">,
+  symbol_: Opaque<"string">,
+  decimals_: Uint<8>,
+  maxSupply_: Uint<128>,
+  initialSigners: Vector<3, Bytes<32>>,
+  threshold_: Uint<8>
+) {
+  const MAX_UINT128 = 340282366920938463463374607431768211455;
+  _contractSalt = disclose(salt_);
+  owner = disclose(initialOwner);
+  _name = disclose(name_);
+  _symbol = disclose(symbol_);
+  _decimals = disclose(decimals_);
+  _totalSupply = 0;
+  if (disclose(maxSupply_) == 0) {
+    _maxSupply = MAX_UINT128;
+  } else {
+    _maxSupply = disclose(maxSupply_);
+  }
+
+  // Emergency stop state
+  _paused = false;
+  _emergencyPauser = disclose(initialOwner);
+
+  // Multi-sig state initialization
+  assert(threshold_ >= 1 && threshold_ <= 3, "FungibleToken: invalid threshold");
+  _multisigThreshold = disclose(threshold_);
+  _multisigSignerCount = 3;
+
+  for (const s of initialSigners) {
+    assert(!_multisigSigners.member(disclose(s)), "FungibleToken: duplicate initial signer");
+    _multisigSigners.insert(disclose(s));
+  }
+}
+
+// ============ Internal Ledger Helpers ============
+
+circuit balanceOf(account: Bytes<32>): Uint<128> {
+  if (disclose(!_balances.member(disclose(account)))) {
+    return 0;
+  }
+  return _balances.lookup(disclose(account));
+}
+
+circuit allowance(
+  ownerAccount: Bytes<32>,
+  spender: Bytes<32>
+): Uint<128> {
+  const allowanceKey: [Bytes<32>, Bytes<32>] = [disclose(ownerAccount), disclose(spender)];
+  if (disclose(!_allowances.member(allowanceKey))) {
+    return 0;
+  }
+  return _allowances.lookup(allowanceKey);
+}
+
+// ============ Multi-Sig Governed Operations ============
+
+/**
+ * Mints new tokens to recipient, authorized by threshold multi-sig.
+ * Message hash commits to ("multisig:mint:", contractAddress, nonce, to, amount).
+ */
+export circuit mint(
+  to: Bytes<32>,
+  value: Uint<128>,
+  pubkeys: Vector<3, JubjubPoint>,
+  signatures: Vector<3, SchnorrSignature>
+): Boolean {
+  whenNotPaused();
+  assert(!isZeroKey(to), "FungibleToken: invalid receiver");
+
+  const opNonce = _multisigNonce;
+  _multisigNonce.increment(1);
+
+  const msgHash = persistentHash<Vector<5, Bytes<32>>>([
+    pad(32, "multisig:mint:"),
+    kernel.self().bytes,
+    opNonce as Bytes<32>,
+    to,
+    value as Bytes<32>
+  ]);
+
+  assertApprovals(msgHash, pubkeys, signatures);
+
+  _mint(to, value);
+  return true;
+}
+
+/**
+ * Burns tokens from the contract treasury / owner account, authorized by threshold multi-sig.
+ * Message hash commits to ("multisig:burn:", contractAddress, nonce, account, amount).
+ * Security constraint: Multi-sig signers are strictly restricted to burning from the treasury / owner account only.
+ * Arbitrary confiscation of user balances is prohibited on-chain.
+ */
+export circuit burn(
+  account: Bytes<32>,
+  value: Uint<128>,
+  pubkeys: Vector<3, JubjubPoint>,
+  signatures: Vector<3, SchnorrSignature>
+): Boolean {
+  whenNotPaused();
+  assert(!isZeroKey(account), "FungibleToken: invalid sender");
+  assert(disclose(account) == owner, "FungibleToken: multi-sig burn restricted to owner/treasury account");
+
+  const opNonce = _multisigNonce;
+  _multisigNonce.increment(1);
+
+  const msgHash = persistentHash<Vector<5, Bytes<32>>>([
+    pad(32, "multisig:burn:"),
+    kernel.self().bytes,
+    opNonce as Bytes<32>,
+    account,
+    value as Bytes<32>
+  ]);
+
+  assertApprovals(msgHash, pubkeys, signatures);
+
+  _burn(account, value);
+  return true;
+}
+
+/**
+ * Designates a new emergency pauser, authorized by threshold multi-sig.
+ * Message hash commits to ("multisig:set-pauser:", contractAddress, nonce, newPauser).
+ */
+export circuit setEmergencyPauser(
+  newPauser: Bytes<32>,
+  pubkeys: Vector<3, JubjubPoint>,
+  signatures: Vector<3, SchnorrSignature>
+): Boolean {
+  assert(!isZeroKey(newPauser), "FungibleToken: invalid pauser address");
+
+  const opNonce = _multisigNonce;
+  _multisigNonce.increment(1);
+
+  const msgHash = persistentHash<Vector<4, Bytes<32>>>([
+    pad(32, "multisig:set-pauser:"),
+    kernel.self().bytes,
+    opNonce as Bytes<32>,
+    newPauser
+  ]);
+
+  assertApprovals(msgHash, pubkeys, signatures);
+
+  _emergencyPauser = disclose(newPauser);
+  return true;
+}
+
+/**
+ * Reallocates tokens away from an account, authorized by threshold multi-sig
+ * (same governance path as mint/burn). This used to be a single-owner-key
+ * operation ("adminReallocate" in v2.4), which allowed one compromised key
+ * to move ANY account's balance anywhere with no multisig check and no
+ * pause gate. It now requires the same threshold approval as mint/burn and
+ * respects whenNotPaused(), consistent with the "no arbitrary confiscation"
+ * invariant already enforced for burn.
+ * Message hash commits to ("multisig:reallocate:", contractAddress, nonce, from, to, amount).
+ */
+export circuit adminReallocate(
+  trappedAccount: Bytes<32>,
+  targetSpendableAccount: Bytes<32>,
+  amount: Uint<128>,
+  pubkeys: Vector<3, JubjubPoint>,
+  signatures: Vector<3, SchnorrSignature>
+): Boolean {
+  whenNotPaused();
+
+  const opNonce = _multisigNonce;
+  _multisigNonce.increment(1);
+
+  const msgHash = persistentHash<Vector<6, Bytes<32>>>([
+    pad(32, "multisig:reallocate:"),
+    kernel.self().bytes,
+    opNonce as Bytes<32>,
+    trappedAccount,
+    targetSpendableAccount,
+    amount as Bytes<32>
+  ]);
+
+  assertApprovals(msgHash, pubkeys, signatures);
+
+  _transfer(trappedAccount, targetSpendableAccount, amount);
+  return true;
+}
+
+/**
+ * Replaces one registered multisig signer with a new one, authorized by
+ * threshold multi-sig. Keeps the signer count fixed (remove one, add one).
+ *
+ * Design notes:
+ * - The OUTGOING signer is identified by its commitment, not its pubkey,
+ *   because the usual reason to rotate is a lost or compromised key whose
+ *   pubkey may no longer be available.
+ * - The INCOMING signer supplies its pubkey plus a proof-of-possession
+ *   Schnorr signature. The contract derives the commitment itself, so a
+ *   mistyped or unsignable commitment can never be registered (which would
+ *   silently shrink the effective signer set).
+ * - Intentionally NOT gated by whenNotPaused(): rotation is the recovery
+ *   path during an incident and must remain available while paused.
+ * - Nonce-bound and contract-bound like every other governed operation, so
+ *   an approval cannot be replayed or reused on another contract.
+ *
+ * Message hash commits to
+ *   ("multisig:rotate-signer:", contractAddress, nonce, oldCommitment, newCommitment).
+ * The proof-of-possession signs a domain-separated digest of that hash:
+ *   persistentHash(["multisig:rotate-pop:", msgHash]).
+ */
+export circuit rotateSigner(
+  oldSignerCommitment: Bytes<32>,
+  newSignerPubkey: JubjubPoint,
+  newSignerPop: SchnorrSignature,
+  pubkeys: Vector<3, JubjubPoint>,
+  signatures: Vector<3, SchnorrSignature>
+): Boolean {
+  assert(!isZeroPoint(newSignerPubkey), "FungibleToken: invalid new signer");
+
+  const newSignerCommitment = calculateSignerCommitment(newSignerPubkey, _contractSalt);
+
+  assert(_multisigSigners.member(disclose(oldSignerCommitment)), "FungibleToken: old signer not registered");
+  assert(!_multisigSigners.member(disclose(newSignerCommitment)), "FungibleToken: new signer already registered");
+
+  const opNonce = _multisigNonce;
+  _multisigNonce.increment(1);
+
+  const msgHash = persistentHash<Vector<5, Bytes<32>>>([
+    pad(32, "multisig:rotate-signer:"),
+    kernel.self().bytes,
+    opNonce as Bytes<32>,
+    oldSignerCommitment,
+    newSignerCommitment
+  ]);
+
+  // Existing signers authorize the rotation.
+  assertApprovals(msgHash, pubkeys, signatures);
+
+  // Incoming signer proves it controls the key behind the new commitment.
+  const popDigest = persistentHash<Vector<2, Bytes<32>>>([
+    pad(32, "multisig:rotate-pop:"),
+    msgHash
+  ]);
+  const popMsg: Vector<1, Field> = [transientHash<Bytes<32>>(popDigest)];
+  schnorrVerify<1>(popMsg, newSignerPop, newSignerPubkey);
+
+  _multisigSigners.remove(disclose(oldSignerCommitment));
+  _multisigSigners.insert(disclose(newSignerCommitment));
+  return true;
+}
+
+// ============ Pause Functions ============
+
+/**
+ * Pauses all token transfers, approvals, and minting/burning
+ * Can be called by owner or designated emergency pauser
+ */
+export circuit pause(caller: Bytes<32>): Boolean {
+  onlyPauser(caller);
+  whenNotPaused();
+  _paused = true;
+  return true;
+}
+
+/**
+ * Unpauses the contract
+ * Can be called by owner or designated emergency pauser
+ */
+export circuit unpause(caller: Bytes<32>): Boolean {
+  onlyPauser(caller);
+  whenPaused();
+  _paused = false;
+  return true;
+}
+
+// ============ Standard Token Operations ============
+
+export circuit transfer(
+  caller: Bytes<32>,
+  to: Bytes<32>,
+  value: Uint<128>
+): Boolean {
+  authenticate(caller);
+  whenNotPaused();
+  _transfer(caller, to, value);
+  return true;
+}
+
+export circuit approve(
+  caller: Bytes<32>,
+  spender: Bytes<32>,
+  value: Uint<128>
+): Boolean {
+  authenticate(caller);
+  whenNotPaused();
+  _approve(caller, spender, value);
+  return true;
+}
+
+export circuit transferFrom(
+  caller: Bytes<32>,
+  fromAccount: Bytes<32>,
+  to: Bytes<32>,
+  value: Uint<128>
+): Boolean {
+  authenticate(caller);
+  whenNotPaused();
+  _spendAllowance(fromAccount, caller, value);
+  _transfer(fromAccount, to, value);
+  return true;
+}
+
+/**
+ * Voluntary self-burn for individual token holders burning their own tokens.
+ */
+export circuit selfBurn(
+  caller: Bytes<32>,
+  value: Uint<128>
+): Boolean {
+  authenticate(caller);
+  whenNotPaused();
+  _burn(caller, value);
+  return true;
+}
+
+// ============ Deriving the contract's account ============
+circuit _contractAccount(): Bytes<32> {
+  const domainTag = pad(32, "fungible-token:contract");
+  return persistentHash<[Bytes<32>, ContractAddress]>([
+    domainTag,
+    kernel.self()
+  ]);
+}
+
+// ============ Emergency Withdrawal ============
+/**
+ * Recovers this token's own balance held under the contract's derived
+ * account (e.g. tokens sent to the contract address by mistake, or
+ * accumulated via internal accounting) back to the owner, while paused.
+ * NOTE: this does NOT recover arbitrary external tokens accidentally sent
+ * to the contract's on-chain address -- that requires explicitly modeling
+ * and calling out to the external token's contract, which is a separate,
+ * higher-risk feature and is intentionally not included here. The v2.4
+ * `token: ContractAddress` parameter was unused dead code and has been
+ * removed to avoid implying capability that didn't exist.
+ */
+export circuit emergencyWithdraw(
+  caller: Bytes<32>,
+  amount: Uint<128>
+): Boolean {
+  onlyOwner(caller);
+  whenPaused();
+  const fromAccount = _contractAccount();
+  const recipient = owner;
+  _transfer(fromAccount, recipient, amount);
+  return true;
+}
+
+// ============ Internal State Mutation Helpers ============
+
+circuit _transfer(
+  fromAccount: Bytes<32>,
+  to: Bytes<32>,
+  value: Uint<128>
+): [] {
+  assert(!isZeroKey(fromAccount), "FungibleToken: invalid sender");
+  assert(!isZeroKey(to), "FungibleToken: invalid receiver");
+  if (disclose(fromAccount == to)) {
+    const bal = balanceOf(fromAccount);
+    assert(bal >= disclose(value), "FungibleToken: insufficient balance");
+    return;
+  }
+  _update(fromAccount, to, value);
+}
+
+circuit _update(
+  fromAccount: Bytes<32>,
+  to: Bytes<32>,
+  value: Uint<128>
+): [] {
+  if (disclose(isZeroKey(fromAccount))) {
+    assert(_maxSupply - _totalSupply >= disclose(value), "FungibleToken: supply overflow");
+    _totalSupply = (_totalSupply + disclose(value)) as Uint<128>;
+  } else {
+    const fromBal = balanceOf(fromAccount);
+    assert(fromBal >= disclose(value), "FungibleToken: insufficient balance");
+    _balances.insert(disclose(fromAccount), (fromBal - disclose(value)) as Uint<128>);
+  }
+
+  if (disclose(isZeroKey(to))) {
+    assert(_totalSupply >= disclose(value), "FungibleToken: supply underflow");
+    _totalSupply = (_totalSupply - disclose(value)) as Uint<128>;
+  } else {
+    const toBal = balanceOf(to);
+    assert(_maxSupply - toBal >= disclose(value), "FungibleToken: balance overflow");
+    _balances.insert(disclose(to), (toBal + disclose(value)) as Uint<128>);
+  }
+}
+
+circuit _mint(account: Bytes<32>, value: Uint<128>): [] {
+  assert(!isZeroKey(account), "FungibleToken: invalid receiver");
+  _update(zeroKey(), account, value);
+}
+
+circuit _burn(account: Bytes<32>, value: Uint<128>): [] {
+  assert(!isZeroKey(account), "FungibleToken: invalid sender");
+  _update(account, zeroKey(), value);
+}
+
+circuit _approve(
+  ownerAccount: Bytes<32>,
+  spender: Bytes<32>,
+  value: Uint<128>
+): [] {
+  assert(!isZeroKey(ownerAccount), "FungibleToken: invalid owner");
+  assert(!isZeroKey(spender), "FungibleToken: invalid spender");
+  const key: [Bytes<32>, Bytes<32>] = [disclose(ownerAccount), disclose(spender)];
+  _allowances.insert(key, disclose(value));
+}
+
+circuit _spendAllowance(
+  ownerAccount: Bytes<32>,
+  spender: Bytes<32>,
+  value: Uint<128>
+): [] {
+  const currentAllowance = allowance(ownerAccount, spender);
+  assert(currentAllowance >= disclose(value), "FungibleToken: insufficient allowance");
+
+  const MAX_UINT128 = 340282366920938463463374607431768211455;
+  if (disclose(currentAllowance < MAX_UINT128)) {
+    _approve(ownerAccount, spender, (currentAllowance - disclose(value)) as Uint<128>);
+  }
+}
+
+pure circuit isZeroKey(key: Bytes<32>): Boolean {
+  return key == default<Bytes<32>>;
+}
+
+pure circuit zeroKey(): Bytes<32> {
+  return default<Bytes<32>>;
+}

@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+
+html { background: #070812; }
+body {
+  @apply min-h-screen bg-midnight-950 font-sans text-slate-200 antialiased;
+  background-image:
+    radial-gradient(1200px 500px at 15% -10%, rgba(90, 98, 240, 0.18), transparent 60%),
+    radial-gradient(900px 450px at 100% 0%, rgba(168, 85, 247, 0.12), transparent 55%);
+  background-attachment: fixed;
+}
+
+@layer components {
+  .card { @apply rounded-2xl border border-midnight-700 bg-midnight-850/80 p-4 shadow-glow backdrop-blur sm:p-5; }
+  .card-title { @apply mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-accent-soft; }
+  .label { @apply mb-1 block text-xs font-medium text-slate-400; }
+  .input { @apply w-full rounded-lg border border-midnight-600 bg-midnight-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:opacity-50; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-primary { @apply btn bg-accent-strong text-white hover:bg-accent; }
+  .btn-ghost { @apply btn border border-midnight-600 bg-midnight-800 text-slate-200 hover:border-accent/60 hover:bg-midnight-700; }
+  .btn-danger { @apply btn border border-bad/40 bg-bad/10 text-bad hover:bg-bad/20; }
+  .badge { @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium; }
+  .mono { @apply font-mono text-xs break-all; }
+}
+
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

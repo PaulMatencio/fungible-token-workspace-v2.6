@@ -1,0 +1,190 @@
+// SPDX-License-Identifier: MIT
+//
+// SignerTools -- *** NEVER DEPLOY THIS FILE ***
+//
+// This file exists only to be compiled for its JavaScript bindings
+// (`pureCircuits`). Every circuit below is a byte-for-byte copy of an
+// expression used inside FungibleToken_v2.6.compact, exposed as an exported
+// pure circuit so the off-chain signer tool computes digests and Schnorr
+// challenges with the SAME compiled standard-library code the on-chain
+// circuits use, instead of a hand-written reimplementation.
+//
+// If you change ANY hash construction in FungibleToken_v2.6.compact, change
+// the matching circuit here and recompile, or signatures will stop verifying.
+//
+// Compile without proving keys (pure circuits need none):
+//   compact compile --skip-zk compact/SignerTools.compact managed/signer-tools
+pragma language_version >= 0.23;
+
+import CompactStandardLibrary;
+
+struct SchnorrHashInput<#n> {
+  ann_x: Field,
+  ann_y: Field,
+  pk_x: Field,
+  pk_y: Field,
+  msg: Vector<n, Field>
+}
+
+// pk = sk * G. An explicit `as JubjubScalar` cast is required since compactc 0.19 /
+// toolchain 0.34 made JubjubScalar a distinct type from Field; safe here since
+// callers are expected to pass an already-reduced scalar (see lib.ts randomScalar).
+export pure circuit derivePublicKey(sk: Field): JubjubPoint {
+  return ecMulGenerator(sk as JubjubScalar);
+}
+
+// Copy of FungibleToken.calculateSignerCommitment.
+export pure circuit calculateSignerCommitment(pk: JubjubPoint, salt: Bytes<32>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>, Bytes<32>, Bytes<32>]>([
+    pad(32, "multisig:signer:"),
+    salt,
+    jubjubPointX(pk) as Bytes<32>,
+    jubjubPointY(pk) as Bytes<32>
+  ]);
+}
+
+// Full (untruncated) Schnorr challenge, exactly as computed in schnorrVerify<1>
+// for a 32-byte message hash (see assertApprovals / rotateSigner). The signer
+// reduces it mod 2^248 in JS, matching the contract's getSchnorrReduction check.
+export pure circuit schnorrChallenge(
+  announcement: JubjubPoint,
+  pk: JubjubPoint,
+  msgHash: Bytes<32>
+): Field {
+  const msgVec: Vector<1, Field> = [transientHash<Bytes<32>>(msgHash)];
+  return transientHash<SchnorrHashInput<1>>(
+    SchnorrHashInput<1> {
+      ann_x: jubjubPointX(announcement),
+      ann_y: jubjubPointY(announcement),
+      pk_x: jubjubPointX(pk),
+      pk_y: jubjubPointY(pk),
+      msg: msgVec
+    }
+  );
+}
+
+// The verification equation from schnorrVerify: response*G == announcement + pk*c.
+// Used only for the tool's self-check before it releases a signature.
+export pure circuit schnorrEquationHolds(
+  announcement: JubjubPoint,
+  response: Field,
+  pk: JubjubPoint,
+  c: Field
+): Boolean {
+  const lhs: JubjubPoint = ecMulGenerator(response as JubjubScalar);
+  const rhs: JubjubPoint = ecAdd(announcement, ecMul(pk, c as JubjubScalar));
+  return jubjubPointX(lhs) == jubjubPointX(rhs) && jubjubPointY(lhs) == jubjubPointY(rhs);
+}
+
+// ---- Operation digests: copies of the msgHash built in each governed circuit.
+// `contractAddress` is kernel.self().bytes; `nonce` is the value of
+// _multisigNonce at call time (read BEFORE the circuit increments it).
+
+export pure circuit mintDigest(
+  contractAddress: Bytes<32>,
+  nonce: Uint<64>,
+  to: Bytes<32>,
+  value: Uint<128>
+): Bytes<32> {
+  return persistentHash<Vector<5, Bytes<32>>>([
+    pad(32, "multisig:mint:"),
+    contractAddress,
+    nonce as Bytes<32>,
+    to,
+    value as Bytes<32>
+  ]);
+}
+
+export pure circuit burnDigest(
+  contractAddress: Bytes<32>,
+  nonce: Uint<64>,
+  account: Bytes<32>,
+  value: Uint<128>
+): Bytes<32> {
+  return persistentHash<Vector<5, Bytes<32>>>([
+    pad(32, "multisig:burn:"),
+    contractAddress,
+    nonce as Bytes<32>,
+    account,
+    value as Bytes<32>
+  ]);
+}
+
+export pure circuit setEmergencyPauserDigest(
+  contractAddress: Bytes<32>,
+  nonce: Uint<64>,
+  newPauser: Bytes<32>
+): Bytes<32> {
+  return persistentHash<Vector<4, Bytes<32>>>([
+    pad(32, "multisig:set-pauser:"),
+    contractAddress,
+    nonce as Bytes<32>,
+    newPauser
+  ]);
+}
+
+export pure circuit adminReallocateDigest(
+  contractAddress: Bytes<32>,
+  nonce: Uint<64>,
+  trappedAccount: Bytes<32>,
+  targetSpendableAccount: Bytes<32>,
+  amount: Uint<128>
+): Bytes<32> {
+  return persistentHash<Vector<6, Bytes<32>>>([
+    pad(32, "multisig:reallocate:"),
+    contractAddress,
+    nonce as Bytes<32>,
+    trappedAccount,
+    targetSpendableAccount,
+    amount as Bytes<32>
+  ]);
+}
+
+// The new commitment is derived from the incoming pubkey + contract salt,
+// exactly as rotateSigner does on-chain.
+export pure circuit rotateSignerDigest(
+  contractAddress: Bytes<32>,
+  nonce: Uint<64>,
+  oldSignerCommitment: Bytes<32>,
+  newSignerPubkey: JubjubPoint,
+  contractSalt: Bytes<32>
+): Bytes<32> {
+  const newSignerCommitment = calculateSignerCommitment(newSignerPubkey, contractSalt);
+  return persistentHash<Vector<5, Bytes<32>>>([
+    pad(32, "multisig:rotate-signer:"),
+    contractAddress,
+    nonce as Bytes<32>,
+    oldSignerCommitment,
+    newSignerCommitment
+  ]);
+}
+
+// Digest the INCOMING signer signs as proof-of-possession in rotateSigner.
+// ---- v3 (native token) operations ----------------------------------------------------------
+// Copy of FungibleToken v3 burn: ("multisig:burn:", contractAddress, nonce, value). (v2.6 burn also hashed an account.)
+export pure circuit burnDigestV3(contractAddress: Bytes<32>, nonce: Uint<64>, value: Uint<128>): Bytes<32> {
+  return persistentHash<Vector<4, Bytes<32>>>([
+    pad(32, "multisig:burn:"),
+    contractAddress,
+    nonce as Bytes<32>,
+    value as Bytes<32>
+  ]);
+}
+
+// Copy of FungibleToken v3 contractWithdraw: ("multisig:withdraw:", contractAddress, nonce, to, value).
+export pure circuit withdrawDigest(contractAddress: Bytes<32>, nonce: Uint<64>, to: Bytes<32>, value: Uint<128>): Bytes<32> {
+  return persistentHash<Vector<5, Bytes<32>>>([
+    pad(32, "multisig:withdraw:"),
+    contractAddress,
+    nonce as Bytes<32>,
+    to,
+    value as Bytes<32>
+  ]);
+}
+
+export pure circuit rotatePopDigest(msgHash: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([
+    pad(32, "multisig:rotate-pop:"),
+    msgHash
+  ]);
+}

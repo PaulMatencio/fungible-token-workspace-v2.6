@@ -1,0 +1,793 @@
+{
+  "compiler-version": "0.31.1",
+  "language-version": "0.23.0",
+  "runtime-version": "0.16.0",
+  "circuits": [
+    {
+      "name": "calculateSignerCommitment",
+      "pure": true,
+      "proof": false,
+      "arguments": [
+        {
+          "name": "pk",
+          "type": {
+            "type-name": "Alias",
+            "name": "JubjubPoint",
+            "type": {
+              "type-name": "Opaque",
+              "tsType": "JubjubPoint"
+            }
+          }
+        },
+        {
+          "name": "salt",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "mint",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "to",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 340282366920938463463374607431768211455
+          }
+        },
+        {
+          "name": "pubkeys",
+          "type": {
+            "type-name": "Vector",
+            "length": 3,
+            "type": {
+              "type-name": "Alias",
+              "name": "JubjubPoint",
+              "type": {
+                "type-name": "Opaque",
+                "tsType": "JubjubPoint"
+              }
+            }
+          }
+        },
+        {
+          "name": "signatures",
+          "type": {
+            "type-name": "Vector",
+            "length": 3,
+            "type": {
+              "type-name": "Struct",
+              "name": "SchnorrSignature",
+              "elements": [
+                {
+                  "name": "announcement",
+                  "type": {
+                    "type-name": "Alias",
+                    "name": "JubjubPoint",
+                    "type": {
+                      "type-name": "Opaque",
+                      "tsType": "JubjubPoint"
+                    }
+                  }
+                },
+                {
+                  "name": "response",
+                  "type": {
+                    "type-name": "Field"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "burn",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "account",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 340282366920938463463374607431768211455
+          }
+        },
+        {
+          "name": "pubkeys",
+          "type": {
+            "type-name": "Vector",
+            "length": 3,
+            "type": {
+              "type-name": "Alias",
+              "name": "JubjubPoint",
+              "type": {
+                "type-name": "Opaque",
+                "tsType": "JubjubPoint"
+              }
+            }
+          }
+        },
+        {
+          "name": "signatures",
+          "type": {
+            "type-name": "Vector",
+            "length": 3,
+            "type": {
+              "type-name": "Struct",
+              "name": "SchnorrSignature",
+              "elements": [
+                {
+                  "name": "announcement",
+                  "type": {
+                    "type-name": "Alias",
+                    "name": "JubjubPoint",
+                    "type": {
+                      "type-name": "Opaque",
+                      "tsType": "JubjubPoint"
+                    }
+                  }
+                },
+                {
+                  "name": "response",
+                  "type": {
+                    "type-name": "Field"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "setEmergencyPauser",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "newPauser",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "pubkeys",
+          "type": {
+            "type-name": "Vector",
+            "length": 3,
+            "type": {
+              "type-name": "Alias",
+              "name": "JubjubPoint",
+              "type": {
+                "type-name": "Opaque",
+                "tsType": "JubjubPoint"
+              }
+            }
+          }
+        },
+        {
+          "name": "signatures",
+          "type": {
+            "type-name": "Vector",
+            "length": 3,
+            "type": {
+              "type-name": "Struct",
+              "name": "SchnorrSignature",
+              "elements": [
+                {
+                  "name": "announcement",
+                  "type": {
+                    "type-name": "Alias",
+                    "name": "JubjubPoint",
+                    "type": {
+                      "type-name": "Opaque",
+                      "tsType": "JubjubPoint"
+                    }
+                  }
+                },
+                {
+                  "name": "response",
+                  "type": {
+                    "type-name": "Field"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "adminReallocate",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "trappedAccount",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "targetSpendableAccount",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "amount",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 340282366920938463463374607431768211455
+          }
+        },
+        {
+          "name": "pubkeys",
+          "type": {
+            "type-name": "Vector",
+            "length": 3,
+            "type": {
+              "type-name": "Alias",
+              "name": "JubjubPoint",
+              "type": {
+                "type-name": "Opaque",
+                "tsType": "JubjubPoint"
+              }
+            }
+          }
+        },
+        {
+          "name": "signatures",
+          "type": {
+            "type-name": "Vector",
+            "length": 3,
+            "type": {
+              "type-name": "Struct",
+              "name": "SchnorrSignature",
+              "elements": [
+                {
+                  "name": "announcement",
+                  "type": {
+                    "type-name": "Alias",
+                    "name": "JubjubPoint",
+                    "type": {
+                      "type-name": "Opaque",
+                      "tsType": "JubjubPoint"
+                    }
+                  }
+                },
+                {
+                  "name": "response",
+                  "type": {
+                    "type-name": "Field"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "rotateSigner",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "oldSignerCommitment",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "newSignerPubkey",
+          "type": {
+            "type-name": "Alias",
+            "name": "JubjubPoint",
+            "type": {
+              "type-name": "Opaque",
+              "tsType": "JubjubPoint"
+            }
+          }
+        },
+        {
+          "name": "newSignerPop",
+          "type": {
+            "type-name": "Struct",
+            "name": "SchnorrSignature",
+            "elements": [
+              {
+                "name": "announcement",
+                "type": {
+                  "type-name": "Alias",
+                  "name": "JubjubPoint",
+                  "type": {
+                    "type-name": "Opaque",
+                    "tsType": "JubjubPoint"
+                  }
+                }
+              },
+              {
+                "name": "response",
+                "type": {
+                  "type-name": "Field"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "pubkeys",
+          "type": {
+            "type-name": "Vector",
+            "length": 3,
+            "type": {
+              "type-name": "Alias",
+              "name": "JubjubPoint",
+              "type": {
+                "type-name": "Opaque",
+                "tsType": "JubjubPoint"
+              }
+            }
+          }
+        },
+        {
+          "name": "signatures",
+          "type": {
+            "type-name": "Vector",
+            "length": 3,
+            "type": {
+              "type-name": "Struct",
+              "name": "SchnorrSignature",
+              "elements": [
+                {
+                  "name": "announcement",
+                  "type": {
+                    "type-name": "Alias",
+                    "name": "JubjubPoint",
+                    "type": {
+                      "type-name": "Opaque",
+                      "tsType": "JubjubPoint"
+                    }
+                  }
+                },
+                {
+                  "name": "response",
+                  "type": {
+                    "type-name": "Field"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "pause",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "caller",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "unpause",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "caller",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "transfer",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "caller",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "to",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 340282366920938463463374607431768211455
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "approve",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "caller",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "spender",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 340282366920938463463374607431768211455
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "transferFrom",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "caller",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "fromAccount",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "to",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 340282366920938463463374607431768211455
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "selfBurn",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "caller",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 340282366920938463463374607431768211455
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "emergencyWithdraw",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "caller",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "amount",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 340282366920938463463374607431768211455
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Boolean"
+      }
+    }
+  ],
+  "witnesses": [
+    {
+      "name": "getSchnorrReduction",
+      "arguments": [
+        {
+          "name": "challengeHash",
+          "type": {
+            "type-name": "Field"
+          }
+        }
+      ],
+      "result type": {
+        "type-name": "Tuple",
+        "types": [
+          {
+            "type-name": "Field"
+          },
+          {
+            "type-name": "Uint",
+            "maxval": 452312848583266388373324160190187140051835877600158453279131187530910662655
+          }
+        ]
+      }
+    },
+    {
+      "name": "localSecretKey",
+      "arguments": [
+      ],
+      "result type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    }
+  ],
+  "contracts": [
+  ],
+  "ledger": [
+    {
+      "name": "_balances",
+      "index": 0,
+      "exported": true,
+      "storage": "Map",
+      "key": {
+        "type-name": "Bytes",
+        "length": 32
+      },
+      "value": {
+        "type-name": "Uint",
+        "maxval": 340282366920938463463374607431768211455
+      }
+    },
+    {
+      "name": "_allowances",
+      "index": 1,
+      "exported": true,
+      "storage": "Map",
+      "key": {
+        "type-name": "Tuple",
+        "types": [
+          {
+            "type-name": "Bytes",
+            "length": 32
+          },
+          {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        ]
+      },
+      "value": {
+        "type-name": "Uint",
+        "maxval": 340282366920938463463374607431768211455
+      }
+    },
+    {
+      "name": "_totalSupply",
+      "index": 2,
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Uint",
+        "maxval": 340282366920938463463374607431768211455
+      }
+    },
+    {
+      "name": "_maxSupply",
+      "index": 3,
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Uint",
+        "maxval": 340282366920938463463374607431768211455
+      }
+    },
+    {
+      "name": "_name",
+      "index": 4,
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Opaque",
+        "tsType": "string"
+      }
+    },
+    {
+      "name": "_symbol",
+      "index": 5,
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Opaque",
+        "tsType": "string"
+      }
+    },
+    {
+      "name": "_decimals",
+      "index": 6,
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Uint",
+        "maxval": 255
+      }
+    },
+    {
+      "name": "owner",
+      "index": 7,
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "_contractSalt",
+      "index": 8,
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "_paused",
+      "index": 9,
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "_emergencyPauser",
+      "index": 10,
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "_multisigSigners",
+      "index": 11,
+      "exported": true,
+      "storage": "Set",
+      "type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "_multisigThreshold",
+      "index": 12,
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Uint",
+        "maxval": 255
+      }
+    },
+    {
+      "name": "_multisigSignerCount",
+      "index": 13,
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Uint",
+        "maxval": 255
+      }
+    },
+    {
+      "name": "_multisigNonce",
+      "index": 14,
+      "exported": true,
+      "storage": "Counter"
+    }
+  ]
+}

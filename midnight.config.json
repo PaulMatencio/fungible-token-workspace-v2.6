@@ -1,0 +1,23 @@
+{
+  "networkId": "preprod",
+  "indexer": "https://indexer.preprod.midnight.network/api/v4/graphql",
+  "indexerWS": "wss://indexer.preprod.midnight.network/api/v4/graphql/ws",
+  "nodeRpc": "https://rpc.preprod.midnight.network",
+  "proofServer": "http://127.0.0.1:6300",
+  "faucet": "https://faucet.preprod.midnight.network",
+  "explorer": "https://explorer.1am.xyz",
+  "contract": {
+    "source": "contract/fungible_token_v2.6.compact",
+    "name": "fungible-token-v2.6",
+    "managedDir": "contract/managed/fungible-token-v2.6",
+    "sdkDir": "sdk/fungible-token-v2.6",
+    "testsDir": "tests/generated",
+    "compilerVersion": "0.31.1",
+    "deployCircuits": [
+      "transfer",
+      "approve",
+      "transferFrom",
+      "selfBurn"
+    ]
+  }
+}
