@@ -26,3 +26,10 @@ Your deployed v2.6 contract on preprod: `8edd96b60f907c94d0e84988a71e573aa3229a3
 this browser's storage — **port 3001 is a different origin than 3000**, so import them here (Overview → Your identity).
 
 Shared tooling: `../signer-tools` signs both versions' requests (`burn {account,value}` and `adminReallocate` for v2.6).
+
+## ⚠ Security warning — do not deploy this contract
+
+`contract/fungible_token_v2.6.compact` has the same flaw that was fixed in the v3 project on 2026-10-03: the Schnorr
+challenge-reduction quotient `q` is an unbounded `Field`, so a prover can choose the challenge and forge multisig
+approvals using only the signers' public keys. This legacy project is kept for reference only; use
+`fungible-token-workspace` (v3) for any real deployment.
