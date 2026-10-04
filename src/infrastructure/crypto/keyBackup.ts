@@ -84,10 +84,11 @@ export async function encryptKeyBackup(payload: BackupPayload, passphrase: strin
 
 export function parseKeyBackup(text: string): KeyBackupFile {
   let f: KeyBackupFile;
+  if (!text.trim()) throw new Error('The backup file is empty (0 bytes). The download was probably interrupted — download a new encrypted backup from the browser that still holds the key.');
   try {
     f = JSON.parse(text) as KeyBackupFile;
   } catch {
-    throw new Error('This is not a key backup file (invalid JSON).');
+    throw new Error('This is not a key backup file (invalid JSON). Choose the fungible-token-key-backup-….json file you downloaded; if it opens as empty or garbled in a text editor, download a new one.');
   }
   if (f?.type !== BACKUP_TYPE || f.version !== 1 || f.kdf?.name !== 'scrypt' || f.cipher?.name !== 'aes-256-gcm' || !f.meta || typeof f.ciphertext !== 'string') {
     throw new Error('This is not a fungible-token key backup file.');

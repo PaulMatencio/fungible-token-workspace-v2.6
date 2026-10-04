@@ -116,8 +116,11 @@ export function IdentityPanel() {
       const a = document.createElement('a');
       a.href = url;
       a.download = backupFileName(f.meta);
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      a.remove();
+      // Revoking right after click() can make Chromium-based browsers (Brave, Chrome) save an empty file.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
       setBkPass('');
       setBkPass2('');
     } finally {

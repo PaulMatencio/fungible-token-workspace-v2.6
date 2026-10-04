@@ -41,6 +41,7 @@ describe('passphrase-protected key backup (scrypt → AES-256-GCM)', () => {
   });
 
   it('refuses foreign files and unexpected scrypt parameters', () => {
+    expect(() => parseKeyBackup('')).toThrow(/empty/);
     expect(() => parseKeyBackup('not json')).toThrow(/invalid JSON/);
     expect(() => parseKeyBackup('{"hello":1}')).toThrow(/not a fungible-token/);
   });
