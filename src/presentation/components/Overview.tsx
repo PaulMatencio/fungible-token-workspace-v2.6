@@ -5,6 +5,7 @@ import { formatAmount } from '@/domain/amount';
 import { shortHex } from '@/domain/hex';
 import { explorerContractUrl } from '@/infrastructure/config/network';
 import { parsePubkey } from '@/application/validation';
+import { backupFileName, MIN_PASSPHRASE } from '@/infrastructure/crypto/keyBackup';
 import { useApp } from '../providers/AppProvider';
 import { useT } from '../i18n';
 import { Badge, Card, Field, Mono, Stat } from './ui';
@@ -94,12 +95,48 @@ export function TokenOverview() {
 
 export function IdentityPanel() {
   const { t } = useT();
-  const { mode, account, state, gateway, mockAccounts, actors, actorId, setActorId, signerPubkey, setSignerPubkey, exportSecretKey, importSecretKey, exportAuthorityKey, importAuthorityKey, guard } = useApp();
+  const { mode, account, state, gateway, mockAccounts, actors, actorId, setActorId, signerPubkey, setSignerPubkey, exportSecretKey, importSecretKey, createEncryptedBackup, restoreEncryptedBackup, exportAuthorityKey, importAuthorityKey, guard } = useApp();
   const [secret, setSecret] = useState('');
   const [shown, setShown] = useState<string | null>(null);
   const [pk, setPk] = useState('');
   const [authShown, setAuthShown] = useState<string | null | undefined>(undefined);
   const [authIn, setAuthIn] = useState('');
+  const [bkPass, setBkPass] = useState('');
+  const [bkPass2, setBkPass2] = useState('');
+  const [rsPass, setRsPass] = useState('');
+  const [rsFile, setRsFile] = useState<File | null>(null);
+  const [bkBusy, setBkBusy] = useState(false);
+
+  const downloadBackup = async () => {
+    if (bkPass !== bkPass2) throw new Error(t('identity.bk.mismatch'));
+    setBkBusy(true);
+    try {
+      const f = await createEncryptedBackup(bkPass);
+      const url = URL.createObjectURL(new Blob([JSON.stringify(f, null, 2)], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = backupFileName(f.meta);
+      a.click();
+      URL.revokeObjectURL(url);
+      setBkPass('');
+      setBkPass2('');
+    } finally {
+      setBkBusy(false);
+    }
+  };
+  const restoreBackup = async () => {
+    if (!rsFile) throw new Error(t('identity.bk.noFile'));
+    setBkBusy(true);
+    try {
+      await restoreEncryptedBackup(await rsFile.text(), rsPass);
+      setRsPass('');
+      setRsFile(null);
+      setAuthShown(undefined);
+    } finally {
+      setBkBusy(false);
+    }
+  };
+
 
   return (
     <Card title={t('identity.title')} icon={<KeyRound size={16} aria-hidden />}>
@@ -134,6 +171,23 @@ export function IdentityPanel() {
           <div className="mb-3 flex flex-wrap gap-2">
             <button type="button" className="btn-ghost" onClick={async () => setShown(await guard(exportSecretKey) ?? null)}>{t('identity.backup')}</button>
             {shown && <Mono value={shown} />}
+          </div>
+          <div className="mb-3 rounded-xl border border-midnight-700 bg-midnight-900/50 p-3">
+            <div className="label">{t('identity.bk.title')}</div>
+            <p className="mb-2 text-xs text-slate-500">{t('identity.bk.hint')}</p>
+            <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <input aria-label={t('identity.bk.pass')} className="input" type="password" autoComplete="new-password" placeholder={t('identity.bk.pass')} value={bkPass} onChange={(e) => setBkPass(e.target.value)} />
+              <input aria-label={t('identity.bk.pass2')} className="input" type="password" autoComplete="new-password" placeholder={t('identity.bk.pass2')} value={bkPass2} onChange={(e) => setBkPass2(e.target.value)} />
+            </div>
+            <button type="button" className="btn-ghost mb-3" disabled={bkBusy || bkPass.length < MIN_PASSPHRASE} onClick={() => void guard(downloadBackup, t('identity.bk.saved'))}>
+              {bkBusy ? t('identity.bk.working') : t('identity.bk.download')}
+            </button>
+            <div className="label">{t('identity.bk.restore')}</div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input aria-label={t('identity.bk.file')} className="input" type="file" accept="application/json,.json" onChange={(e) => setRsFile(e.target.files?.[0] ?? null)} />
+              <input aria-label={t('identity.bk.passRestore')} className="input" type="password" autoComplete="off" placeholder={t('identity.bk.passRestore')} value={rsPass} onChange={(e) => setRsPass(e.target.value)} />
+              <button type="button" className="btn-ghost" disabled={bkBusy || !rsFile || !rsPass} onClick={() => void guard(restoreBackup, t('identity.bk.restored'))}>OK</button>
+            </div>
           </div>
           <Field label={t('identity.import')} htmlFor="import-sk">
             <div className="flex gap-2">

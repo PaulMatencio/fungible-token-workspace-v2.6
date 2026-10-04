@@ -16,6 +16,7 @@ import { networkConfig } from '@/infrastructure/config/network';
 import type { ChainGateway as ChainGatewayType } from '@/infrastructure/gateway/chainGateway';
 import { SimulatorGateway, type SimulatorSnapshot } from '@/infrastructure/gateway/simulatorGateway';
 import { exportAuthorityKey, importAuthorityKey } from '@/infrastructure/storage/authorityKey';
+import { decryptKeyBackup, encryptKeyBackup, type BackupPayload, type KeyBackupFile } from '@/infrastructure/crypto/keyBackup';
 import { DraftStore } from '@/infrastructure/storage/draftStore';
 import { IdentityStore } from '@/infrastructure/storage/identityStore';
 import { LocalStorageStore } from '@/infrastructure/storage/kv';
@@ -114,6 +115,10 @@ interface AppContextValue {
   exportAuthorityKey: () => Promise<string | null>;
   importAuthorityKey: (key: string) => Promise<void>;
   importSecretKey: (hex: string) => Promise<void>;
+  /** Passphrase-protected backup (scrypt + AES-256-GCM) of the identity key and, in Wallet Mode, the open contract's authority key. */
+  createEncryptedBackup: (passphrase: string) => Promise<KeyBackupFile>;
+  /** Restores an encrypted backup file (identity key, and the authority key if the file holds one). */
+  restoreEncryptedBackup: (fileText: string, passphrase: string) => Promise<{ authorityRestored: boolean }>;
   signerPubkey: JubjubPointJson | null;
   setSignerPubkey: (p: JubjubPointJson | null) => Promise<void>;
   tooling: HttpToolingClient;
@@ -609,6 +614,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       const sk = await identityStore.importSecretKey(v);
       setWalletSk(sk);
+    },
+    createEncryptedBackup: async (passphrase) => {
+      const payload: BackupPayload = { identitySecretKey: await identityStore.exportSecretKey() };
+      if (gateway?.mode === 'wallet') {
+        const key = await exportAuthorityKey(store, gateway.contractAddress);
+        if (key) payload.authority = { contractAddress: gateway.contractAddress, key };
+      }
+      return encryptKeyBackup(payload, passphrase, account ?? undefined);
+    },
+    restoreEncryptedBackup: async (fileText, passphrase) => {
+      const { payload } = await decryptKeyBackup(fileText, passphrase);
+      const sk = await identityStore.importSecretKey(payload.identitySecretKey); // keeps the replaced key under a backup entry
+      setWalletSk(sk);
+      if (payload.authority) await importAuthorityKey(store, payload.authority.contractAddress, payload.authority.key);
+      return { authorityRestored: !!payload.authority };
     },
     signerPubkey,
     setSignerPubkey: async (p) => {

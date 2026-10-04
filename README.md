@@ -33,3 +33,10 @@ Shared tooling: `../signer-tools` signs both versions' requests (`burn {account,
 challenge-reduction quotient `q` is an unbounded `Field`, so a prover can choose the challenge and forge multisig
 approvals using only the signers' public keys. This legacy project is kept for reference only; use
 `fungible-token-workspace` (v3) for any real deployment.
+
+## Encrypted key backup
+
+**Identity** card → *Encrypted backup*: downloads a passphrase-protected JSON file (scrypt N=2¹⁷ r=8 p=1 → AES-256-GCM, the
+same scheme as the signer-tool key files) with the identity secret key and, when this browser has it, the open
+contract's authority key. *Restore* decrypts a file and re-imports both. Minimum passphrase length 12; it cannot be
+recovered. See `src/infrastructure/crypto/keyBackup.ts`.
