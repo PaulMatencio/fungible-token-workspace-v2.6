@@ -51,7 +51,7 @@ export const en = {
   'identity.bk.passRestore': 'Backup passphrase',
   'identity.bk.noFile': 'Choose a backup file first.',
   'identity.bk.restored': 'Backup restored',
-  'identity.backup': 'Back up secret key',
+  'identity.backup': 'Display secret key',
   'identity.import': 'Import secret key',
   'identity.warn': 'This key authorises your token account. Keep it private; losing it loses the account.',
   'identity.signerKey': 'Signer public key (cosigners)',

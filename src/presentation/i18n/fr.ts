@@ -53,7 +53,7 @@ export const fr: Record<MessageKey, string> = {
   'identity.bk.passRestore': 'Phrase secrète de la sauvegarde',
   'identity.bk.noFile': 'Choisissez d’abord un fichier de sauvegarde.',
   'identity.bk.restored': 'Sauvegarde restaurée',
-  'identity.backup': 'Sauvegarder la clé secrète',
+  'identity.backup': 'Afficher la clé secrète',
   'identity.import': 'Importer une clé secrète',
   'identity.warn': 'Cette clé autorise votre compte. Gardez-la privée ; la perdre fait perdre le compte.',
   'identity.signerKey': 'Clé publique de signataire (cosignataires)',
